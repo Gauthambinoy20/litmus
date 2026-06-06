@@ -147,13 +147,65 @@ litmus/
 
 ## Architecture
 
-Diagrams (Mermaid, derived from the code) live in [`docs/`](docs/):
-[Architecture](docs/architecture.md) · [Data flow](docs/data-flow.md) · [Scan sequence](docs/scan-sequence.md)
+```mermaid
+flowchart TB
+    subgraph Browser["Browser — React 18 + TypeScript"]
+        UI["Landing · Scanner · Results · History"]
+        Hooks["hooks/ — useScan · useFileUpload · useHistory"]
+        LS[("localStorage<br/>scan history")]
+    end
 
+    subgraph API["FastAPI backend"]
+        Routes["api/routes.py<br/>/scan · /compare · /humanize · /export/pdf · …"]
+        MW["middleware — rate limit · errors · logging"]
+        ScanSvc["scan_service.py<br/>parse → extract → score → combine"]
+
+        subgraph Engines["engines/"]
+            Parse["pdf_parser · section_parser"]
+            ATS["ats_engine<br/>5 dimensions"]
+            AIDet["ai_detection_engine<br/>19 signals + heatmap"]
+            Aux["grammar · readability ·<br/>fix_generator · scoring"]
+            Hum["humanizer_engine"]
+        end
+
+        Export["export_service.py — PDF report"]
+    end
+
+    HF["HuggingFace Inference API<br/>(optional, free — graceful offline fallback)"]
+
+    UI --> Hooks -->|"REST /api/v1"| MW --> Routes
+    Routes --> ScanSvc & Export & Hum
+    ScanSvc --> Parse & ATS & AIDet & Aux
+    AIDet -.-> HF
+    Hum -.-> HF
+    Hooks --> LS
 ```
-React 18 + TS (Vite, Tailwind)  →  FastAPI  →  engines/ (ATS · AI-detection · grammar ·
-readability · humanizer · fix generator)  +  services/ (scan · export · analytics)
+
+The scan pipeline as a sequence:
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant FE as React app
+    participant API as FastAPI /scan
+    participant SS as scan_service
+    participant E as engines
+
+    U->>FE: paste resume + JD
+    FE->>API: POST /api/v1/scan
+    API->>SS: validate → scan()
+    SS->>E: parse sections · extract keywords
+    par dual-axis
+        SS->>E: ATS score (5 dims)
+    and
+        SS->>E: AI detection (19 signals)
+    end
+    SS->>E: fixes + combined verdict
+    SS-->>FE: scores · heatmap · fixes (<3s)
+    FE-->>U: results dashboard (saved to localStorage)
 ```
+
+Full detail in [`docs/`](docs/): [Architecture](docs/architecture.md) · [Data flow (DFD)](docs/data-flow.md) · [Scan sequence](docs/scan-sequence.md)
 
 ## Detection approach & ML decisions
 
